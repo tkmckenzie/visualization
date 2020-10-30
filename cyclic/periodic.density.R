@@ -5,6 +5,7 @@ library(mgcv)
 setwd("~/git/visualization/cyclic")
 rm(list = ls())
 
+# Reading data and cleaning
 temps = read.csv("../data/temps.csv") %>%
   mutate(DATE = as.Date(DATE),
          DAY.OF.YEAR = as.numeric(DATE) - as.numeric(as.Date(strftime(DATE, "%Y-01-01"))) + 1,
@@ -25,26 +26,50 @@ abq.temps = temps %>%
 
 ggplot(abq.temps, aes(DAY.OF.YEAR, TAVG)) +
   geom_point(alpha = 0.1) +
+  scale_x_continuous(breaks = as.numeric(as.Date(paste0("2020-", 1:12, "-01"))) - as.numeric(as.Date("2020-01-01")) + 1,
+                     labels = month.abb) +
+  ylim(0, NA) +
+  coord_polar() +
   theme_bw()
 
-# Binning x values
-data = abq.temps %>%
-  select(x = DAY.OF.YEAR, y = TAVG)
 
-n.bins = 30
-x.range = range(data$x)
-x.intervals = seq(x.range[1], x.range[2], length.out = n.bins)
-x.midpoints = (diff(x.intervals) / 2 + x.intervals[-length(x.intervals)])
-data$interval = findInterval(data$x, x.intervals, rightmost.closed = TRUE)
-data$x.midpoint = x.midpoints[data$interval]
+# Parameters/data for 2D KDE
+num.bins = 50
+prop.wrap.range = 0.1 # What proportion of x.range to wrap around to ends for KDE
 
-ggplot(data, aes(x = factor(x.midpoint), y = y)) +
-  stat_density(aes(fill = after_stat(density)), geom = "tile", position = "identity") +
-  # scale_x_continuous(breaks = as.numeric(as.Date(paste0("2020-", 1:12, "-01"))) - as.numeric(as.Date("2020-01-01")) + 1,
-  #                    labels = month.abb) +
+x = abq.temps$DAY.OF.YEAR
+y = abq.temps$TAVG
+
+x.range = range(x)
+x.step.size = (x.range[2] - x.range[1]) / num.bins
+# x.seq = seq(x.range[1] + x.step.size / 2, x.range[2] - x.step.size / 2, length.out = num.bins)
+
+y.range = range(y)
+y.range[1] = 0
+y.step.size = (y.range[2] - y.range[1]) / num.bins
+
+num.wrap.steps = ceiling((x.range[2] - x.range[1]) * prop.wrap.range / x.step.size)
+wrap.window.size = x.step.size * num.wrap.steps
+wrap.obs.lower = x <= x.range[1] + wrap.window.size
+wrap.obs.upper = x >= x.range[2] - wrap.window.size
+
+x = c(x.range[1] - (x.range[2] - x[wrap.obs.upper]), x, x.range[2] + (x[wrap.obs.lower] - x.range[1]))
+y = c(y[wrap.obs.upper], y, y[wrap.obs.lower])
+
+m = MASS::kde2d(x, y, n = num.bins, lim = c(x.range[1] + x.step.size / 2,
+                                            x.range[2] - x.step.size / 2,
+                                            y.range[1] + y.step.size / 2,
+                                            y.range[2] - y.step.size / 2))
+plot.df = data.frame(x = rep(m$x, times = num.bins),
+                     y = rep(m$y, each = num.bins),
+                     fill = c(m$z))
+
+ggplot(plot.df, aes(x = x, y = y, fill = fill)) +
+  geom_tile() +
+  scale_x_continuous(limits = x.range,
+                     breaks = as.numeric(as.Date(paste0("2020-", 1:12, "-01"))) - as.numeric(as.Date("2020-01-01")) + 1,
+                     labels = month.abb) +
   ylim(0, NA) +
-  # coord_polar() +
-  xlab("") +
-  ylab("Temperature (F)") +
+  coord_polar() +
   theme_bw() +
   theme(legend.position = "top")
